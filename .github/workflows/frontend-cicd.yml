@@ -31,11 +31,18 @@ jobs:
       - name: 🛡️ Trivy Image Scan
         continue-on-error: true
         uses: aquasecurity/trivy-action@master
+        env:
+          # Forces Trivy to bypass the Google mirror and pull directly from GitHub
+          TRIVY_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-db:2
         with:
-          image-ref: 'frontend-ecommerce:latest'
+          image-ref: 'frontend-ecommerce:latest' # (Make sure to use 'backend:latest' in the backend file!)
           format: 'table'
           exit-code: '1'
           severity: 'CRITICAL,HIGH'
+          # Uses the built-in GitHub token to bypass anonymous rate limiting
+          github-pat: ${{ secrets.GITHUB_TOKEN }}
+          # Kills the process if it hangs for more than 10 minutes
+          timeout: '10m'
 
       - name: 🚢 Load Image into Kind
         run: kind load docker-image frontend-ecommerce:latest --name kind
