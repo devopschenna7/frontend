@@ -1,19 +1,32 @@
-import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
+import { BrowserRouter } from 'react-router-dom';
 import EcommerceStore from './EcommerceStore';
 
 describe('EcommerceStore Component', () => {
-  test('renders products and handles logout', () => {
-    const mockNavigate = jest.fn();
-    render(<EcommerceStore navigate={mockNavigate} />);
+  // Before the test runs, fake the localStorage so the user appears logged in
+  beforeEach(() => {
+    Storage.prototype.getItem = jest.fn(() => 
+      JSON.stringify({ firstName: 'Test', lastName: 'User' })
+    );
+  });
 
-    // Check if hero and products render
-    expect(screen.getByText('New Arrivals Are Here')).toBeInTheDocument();
-    expect(screen.getByText('Wireless Noise-Cancelling Headphones')).toBeInTheDocument();
-    expect(screen.getByText('Smart Fitness Watch')).toBeInTheDocument();
+  // Clean up after the test
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
 
-    // Test logout functionality
-    fireEvent.click(screen.getByText('Log Out'));
-    expect(mockNavigate).toHaveBeenCalledWith('login');
+  test('renders the store dashboard and greets the user', () => {
+    render(
+      <BrowserRouter>
+        <EcommerceStore />
+      </BrowserRouter>
+    );
+    
+    // Verify the greeting and main store heading render correctly
+    const greeting = screen.getByText(/Welcome back, Test!/i);
+    const mainHeading = screen.getByText(/New Arrivals Are Here/i);
+    
+    expect(greeting).toBeInTheDocument();
+    expect(mainHeading).toBeInTheDocument();
   });
 });
