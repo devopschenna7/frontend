@@ -29,11 +29,12 @@ jobs:
         run: docker build -t frontend-ecommerce:latest .
 
       - name: 🛡️ Trivy Image Scan
+        continue-on-error: true
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: 'frontend-ecommerce:latest'
           format: 'table'
-          exit-code: '0'
+          exit-code: '1'
           severity: 'CRITICAL,HIGH'
 
       - name: 🚢 Load Image into Kind
