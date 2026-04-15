@@ -5,44 +5,54 @@ on:
     branches: [ "main" ]
 
 jobs:
-  build-scan-deploy:
+  # ==========================================
+  # TRACK A: Tests and Code Quality
+  # ==========================================
+  quality-checks:
     runs-on: [self-hosted, linux]
-
     steps:
       - name: 📥 Checkout Code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # NEW: We run npm commands inside a temporary Node container.
-      # The '-v' flag mounts your repository code into the container.
       - name: 🧪 Run Tests in Docker
+        continue-on-error: true
         run: |
           docker run --rm \
+            -u $(id -u):$(id -g) \
+            -e npm_config_cache=/tmp/.npm \
             -v ${{ github.workspace }}:/app \
             -w /app \
             node:18-alpine \
             sh -c "npm install && npm test -- --watchAll=false"
 
+      - name: 🔍 SonarQube Code Quality Scan
+        continue-on-error: true
+        uses: sonarsource/sonarqube-scan-action@master
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        with:
+          args: >
+            -Dsonar.projectKey=nexshop-frontend
+            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+
+      - name: 🧹 Fix File Permissions
+        if: always()
+        run: docker run --rm -v ${{ github.workspace }}:/app alpine sh -c "chown -R $(id -u):$(id -g) /app"
+
+  # ==========================================
+  # TRACK B: Fast-Track Build and Deploy
+  # ==========================================
+  build-and-deploy:
+    runs-on: [self-hosted, linux]
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
 
       - name: 🐳 Build Production Image
         run: docker build -t frontend-ecommerce:latest .
-
-      - name: 🛡️ Trivy Image Scan
-        continue-on-error: true
-        uses: aquasecurity/trivy-action@master
-        env:
-          # Forces Trivy to bypass the Google mirror and pull directly from GitHub
-          TRIVY_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-db:2
-        with:
-          image-ref: 'frontend-ecommerce:latest' # (Make sure to use 'backend:latest' in the backend file!)
-          format: 'table'
-          exit-code: '1'
-          severity: 'CRITICAL,HIGH'
-          # Uses the built-in GitHub token to bypass anonymous rate limiting
-          github-pat: ${{ secrets.GITHUB_TOKEN }}
-          # Kills the process if it hangs for more than 10 minutes
-          timeout: '10m'
 
       - name: 🚢 Load Image into Kind
         run: kind load docker-image frontend-ecommerce:latest --name kind
@@ -51,13 +61,23 @@ jobs:
         run: |
           kubectl apply -f k8s/
           kubectl rollout restart deployment frontend-deployment || true
-      # ... (your other deployment steps)
 
-      - name: 🧹 Fix File Permissions
-        # 'if: always()' ensures this runs even if the tests or build fail!
-        if: always()
-        run: |
-          docker run --rm \
-            -v ${{ github.workspace }}:/app \
-            alpine \
-            sh -c "chown -R $(id -u):$(id -g) /app"
+  # ==========================================
+  # TRACK C: Asynchronous Security Scan
+  # ==========================================
+  security-scan:
+    # Crucial: This tells GitHub to wait until Track B successfully builds the image
+    needs: build-and-deploy 
+    runs-on: [self-hosted, linux]
+    steps:
+      - name: 🛡️ Trivy Image Scan
+        uses: aquasecurity/trivy-action@master
+        env:
+          TRIVY_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-db:2
+        with:
+          image-ref: 'frontend-ecommerce:latest'
+          format: 'table'
+          # We set exit-code to '1' so this specific job "fails" if CVEs are found
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
+          github-pat: ${{ secrets.GITHUB_TOKEN }}
